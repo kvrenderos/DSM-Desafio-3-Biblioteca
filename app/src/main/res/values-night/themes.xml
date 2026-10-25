@@ -1,7 +1,15 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.DesafioBiblioteca" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+<resources>
+    <style name="Base.Theme.DesafioBiblioteca" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#79505E</item>
+        <item name="colorSecondary">#C89A66</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F7EEF1</item>
+        <item name="android:navigationBarColor">#2B2F35</item>
+        
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.DesafioBiblioteca" parent="Base.Theme.DesafioBiblioteca" />
 </resources>
+
+
