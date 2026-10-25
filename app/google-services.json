@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "803270100205",
+    "firebase_url": "https://desafio-bliblioteca-default-rtdb.firebaseio.com",
+    "project_id": "desafio-bliblioteca",
+    "storage_bucket": "desafio-bliblioteca.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:803270100205:android:51a895b5ff9639f98178e4",
+        "android_client_info": {
+          "package_name": "com.example.desafiobiblioteca"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "803270100205-luliif64q5cbh3q3e153164dgvtrdpb9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDDIn8DilTo38Ch2uwqXrg8bJMBVTW3xl0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "803270100205-luliif64q5cbh3q3e153164dgvtrdpb9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
