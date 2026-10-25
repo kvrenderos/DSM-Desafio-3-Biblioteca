@@ -13,6 +13,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
@@ -38,6 +39,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var body: LinearLayout
     private var screen = "Inicio"
     private var busy = false
+    private var editorSnapshot: (() -> Bundle)? = null
+    private var editorCover: String? = null
+    private var originalCover: String? = null
+    private var editorToken: String? = null
+    private var coverPreview: ImageView? = null
+    private var coverStatus: TextView? = null
+    private var removeCoverButton: MaterialButton? = null
+    private var coverImporting = false
+    private val imageExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val pickCover = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && screen == "Libro" && auth.currentUser != null) importCover(uri)
+    }
     private val year get() = Calendar.getInstance().get(Calendar.YEAR)
     private val uid get() = requireNotNull(auth.currentUser).uid
     private data class Field(val layout: TextInputLayout, val edit: TextInputEditText) {
@@ -52,13 +65,19 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() { goBack() }
         })
         screen = savedInstanceState?.getString("screen") ?: "Inicio"
-        if (auth.currentUser == null) showAuth() else navigate(screen)
+        if (auth.currentUser == null) showAuth()
+        else if (screen == "Libro" && savedInstanceState?.getBundle("editor") != null) {
+            val draft = savedInstanceState.getBundle("editor")!!
+            val book = db.books(uid).firstOrNull { it.id == draft.getLong("id") }
+            editor(book, draft)
+        } else navigate(screen)
     }
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString("screen", if (screen == "Libro") "Biblioteca" else screen)
+        outState.putString("screen", screen)
+        if (screen == "Libro") editorSnapshot?.let { outState.putBundle("editor", it()) }
         super.onSaveInstanceState(outState)
     }
-    override fun onDestroy() { db.close(); super.onDestroy() }
+    override fun onDestroy() { imageExecutor.shutdownNow(); db.close(); super.onDestroy() }
     private fun goBack() {
         if (auth.currentUser != null && screen != "Inicio") {
             if (screen == "Libro") AlertDialog.Builder(this).setTitle("¿Salir sin guardar?").setMessage("Los cambios del formulario se descartarán.")
@@ -143,7 +162,7 @@ class MainActivity : AppCompatActivity() {
         val dialog = Dialog(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(48), dp(24), dp(24)); setBackgroundColor(paper) }
         val header = column(content, rose, 20)
-        label(header, "B /", 40, ink, true)
+        bookIcon(header, 52)
         label(header, "Entre páginas", 23, ink, true)
         label(header, "Mi diario de lectura", 14)
         label(content, auth.currentUser?.email ?: "", 13, muted)
@@ -151,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             button(content, name, false) { dialog.dismiss(); when (name) { "Agregar libro" -> editor(); "Meta anual" -> goalDialog(); else -> navigate(name) } }
         }
         label(content, "Cada libro cuenta.", 14, muted)
-        button(content, "Cerrar sesión") { dialog.dismiss(); auth.signOut(); showAuth() }
+        button(content, "Cerrar sesión") { dialog.dismiss(); discardCoverDraft(); auth.signOut(); showAuth() }
         val scroll = ScrollView(this).apply { addView(content) }
         dialog.setContentView(scroll)
         dialog.window?.apply { setBackgroundDrawableResource(android.R.color.transparent); setGravity(Gravity.START) }
@@ -161,7 +180,7 @@ class MainActivity : AppCompatActivity() {
         screen = "Acceso"; busy = false
         base("Entre páginas", false)
         val hero = column(body, rose, 24)
-        label(hero, "B /", 48, ink, true)
+        bookIcon(hero, 64)
         label(hero, "Tu próxima historia\nempieza aquí.", 29, ink, true)
         label(hero, "Un espacio para tus libros, tus avances y tus nuevas metas.", 15)
         label(body, if (register) "Crea tu cuenta" else "Bienvenida a tu biblioteca", 23, ink, true)
@@ -203,6 +222,7 @@ class MainActivity : AppCompatActivity() {
         switch = button(body, if (register) "Ya tengo cuenta · Iniciar sesión" else "Soy nueva · Crear cuenta", false) { if (!busy) showAuth(!register) }
     }
     private fun navigate(destination: String) {
+        discardCoverDraft()
         if (auth.currentUser == null) { showAuth(); return }
         screen = destination
         when (destination) { "Biblioteca" -> library(); "Estadísticas" -> statistics(); else -> { screen = "Inicio"; home() } }
@@ -252,13 +272,66 @@ class MainActivity : AppCompatActivity() {
     }
     private fun empty(title: String, description: String) {
         val card = column(body, Color.WHITE, 22)
-        label(card, "B /", 30, accent, true); label(card, title, 18, ink, true); label(card, description, 14, muted)
+        bookIcon(card, 44); label(card, title, 18, ink, true); label(card, description, 14, muted)
+    }
+    private fun bookIcon(parent: LinearLayout, size: Int) {
+        val icon = ImageView(this).apply { setImageResource(R.drawable.ic_book); contentDescription = "Libro abierto" }
+        parent.addView(icon, LinearLayout.LayoutParams(dp(size), dp(size)).apply { bottomMargin = dp(12) })
+    }
+    private fun showCover(view: ImageView, path: String?, description: String) {
+        val bitmap = CoverStore(this, uid).read(path)
+        view.background = background(cream, 12)
+        view.scaleType = ImageView.ScaleType.FIT_CENTER
+        val padding = if (bitmap == null) dp(16) else dp(3)
+        view.setPadding(padding, padding, padding, padding)
+        if (bitmap == null) view.setImageResource(R.drawable.ic_book) else view.setImageBitmap(bitmap)
+        view.contentDescription = if (bitmap == null) "Sin portada: $description" else description
+    }
+    private fun refreshCoverPreview() {
+        coverPreview?.let { showCover(it, editorCover, "Vista previa de portada") }
+        coverStatus?.text = if (editorCover == null) "Puedes guardar el libro sin imagen." else "Imagen elegida. Guarda el libro para conservarla."
+        removeCoverButton?.visibility = if (editorCover == null) View.GONE else View.VISIBLE
+    }
+    private fun discardCoverDraft() {
+        val currentUser = auth.currentUser
+        if (screen == "Libro" && currentUser != null && editorCover != originalCover) CoverStore(this, currentUser.uid).remove(editorCover)
+        editorToken = null; editorSnapshot = null
+        coverPreview = null; coverStatus = null; removeCoverButton = null
+    }
+    private fun importCover(uri: android.net.Uri) {
+        if (coverImporting) return
+        val owner = uid
+        val token = editorToken
+        val store = CoverStore(this, owner)
+        coverImporting = true
+        coverStatus?.text = "Cargando portada…"
+        imageExecutor.execute {
+            val result = runCatching { store.importImage(uri) }
+            runOnUiThread {
+                if (isDestroyed || screen != "Libro" || auth.currentUser?.uid != owner || token != editorToken) {
+                    result.getOrNull()?.let(store::remove)
+                } else {
+                    coverImporting = false
+                    result.onSuccess { path ->
+                        if (editorCover != originalCover) store.remove(editorCover)
+                        editorCover = path; refreshCoverPreview()
+                    }.onFailure { coverStatus?.text = "No se pudo abrir esa imagen. Elige otra o guarda el libro sin portada." }
+                }
+            }
+        }
     }
     private fun bookCard(book: Book) {
         val card = column(body, Color.WHITE, 18)
-        label(card, "${book.genre.uppercase(Locale.getDefault())} · ${book.state}", 11, accent, true)
-        label(card, book.title, 21, ink, true)
-        label(card, book.author, 14, muted)
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        card.addView(heading, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        val cover = ImageView(this)
+        showCover(cover, book.coverPath, "Portada de ${book.title}")
+        heading.addView(cover, LinearLayout.LayoutParams(dp(88), dp(128)).apply { marginEnd = dp(16) })
+        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heading.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+        label(details, "${book.genre.uppercase(Locale.getDefault())} · ${book.state}", 11, accent, true)
+        label(details, book.title, 21, ink, true)
+        label(details, book.author, 14, muted)
         label(card, "${book.read} / ${book.total} páginas · ${book.percent}%", 14)
         progress(card, book.percent)
         if (book.state == "Terminado") label(card, "${"★".repeat(book.rating)}${"☆".repeat(5-book.rating)}  ·  ${date(book.finishedAt)}", 15, accent)
@@ -280,18 +353,38 @@ class MainActivity : AppCompatActivity() {
             parent.addView(this, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(16) })
         }
     }
-    private fun editor(book: Book? = null) {
+    private fun editor(book: Book? = null, draft: Bundle? = null) {
         screen = "Libro"; base(if (book == null) "Nuevo libro" else "Editar libro")
         label(body, "Una historia para tu estante", 26, ink, true)
         label(body, "Completa los datos y guarda tu avance.", 14, muted)
-        val title = field(body, "Título", book?.title ?: "")
-        val author = field(body, "Autor", book?.author ?: "")
-        val genre = selector(body, "Género", GENRES, book?.genre ?: GENRES[0])
-        val total = field(body, "Total de páginas", book?.total?.toString() ?: "", numeric = true)
-        val read = field(body, "Páginas leídas", book?.read?.toString() ?: "0", numeric = true)
-        val state = selector(body, "Estado", STATES, book?.state ?: STATES[0])
+        editorToken = java.util.UUID.randomUUID().toString()
+        originalCover = book?.coverPath
+        editorCover = if (draft != null) draft.getString("cover") else book?.coverPath
+        coverImporting = false
+        val coverPanel = column(body, Color.WHITE, 18)
+        label(coverPanel, "Portada (opcional)", 18, ink, true)
+        coverPreview = ImageView(this).apply { tag = "cover_preview" }
+        coverPanel.addView(coverPreview, LinearLayout.LayoutParams(dp(112), dp(156)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12) })
+        coverStatus = label(coverPanel, "", 13, muted)
+        button(coverPanel, "Elegir o cambiar imagen", false) {
+            if (!coverImporting) try { pickCover.launch(arrayOf("image/*")) }
+            catch (_: android.content.ActivityNotFoundException) { coverStatus?.text = "No se encontró un selector de imágenes en este dispositivo." }
+        }
+        removeCoverButton = button(coverPanel, "Quitar imagen", false) {
+            if (!coverImporting) {
+                if (editorCover != originalCover) CoverStore(this, uid).remove(editorCover)
+                editorCover = null; refreshCoverPreview()
+            }
+        }
+        refreshCoverPreview()
+        val title = field(body, "Título", draft?.getString("title") ?: book?.title ?: "")
+        val author = field(body, "Autor", draft?.getString("author") ?: book?.author ?: "")
+        val genre = selector(body, "Género", GENRES, draft?.getString("genre") ?: book?.genre ?: GENRES[0])
+        val total = field(body, "Total de páginas", draft?.getString("total") ?: book?.total?.toString() ?: "", numeric = true)
+        val read = field(body, "Páginas leídas", draft?.getString("read") ?: book?.read?.toString() ?: "0", numeric = true)
+        val state = selector(body, "Estado", STATES, draft?.getString("state") ?: book?.state ?: STATES[0])
         val ratingLabel = label(body, "Calificación · solo libros terminados", 14, muted, true)
-        val rating = RatingBar(this).apply { numStars = 5; stepSize = 1f; this.rating = book?.rating?.toFloat() ?: 0f; contentDescription = "Calificación de 1 a 5 estrellas" }
+        val rating = RatingBar(this).apply { numStars = 5; stepSize = 1f; this.rating = draft?.getFloat("rating") ?: book?.rating?.toFloat() ?: 0f; contentDescription = "Calificación de 1 a 5 estrellas" }
         body.addView(rating, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(10) })
         val note = label(body, "", 13, accent)
         var firstSelection = true
@@ -310,14 +403,26 @@ class MainActivity : AppCompatActivity() {
                 note.text = if (finished) "Se guardará la fecha al terminar. Las páginas leídas deben coincidir con el total." else "Actualiza tus páginas al avanzar en la lectura."
             }
         }
+        editorSnapshot = {
+            Bundle().apply {
+                putLong("id", book?.id ?: 0L); putString("cover", editorCover)
+                putString("title", title.edit.text.toString()); putString("author", author.edit.text.toString())
+                putString("total", total.edit.text.toString()); putString("read", read.edit.text.toString())
+                putString("genre", genre.selectedItem.toString()); putString("state", state.selectedItem.toString())
+                putFloat("rating", rating.rating)
+            }
+        }
         button(body, "Guardar libro") {
+            if (coverImporting) return@button
             listOf(title, author, total, read).forEach { it.error(null) }
             val errors = BookRules.validate(title.value, author.value, total.value.toIntOrNull(), read.value.toIntOrNull(), state.selectedItem.toString(), rating.rating.toInt())
             val fields = mapOf("title" to title, "author" to author, "total" to total, "read" to read)
             errors.forEach { (key, error) -> fields[key]?.error(error) }
             if (errors.isNotEmpty()) { note.text = errors.values.joinToString("\n"); fields[errors.keys.first()]?.edit?.requestFocus() }
             else try {
-                db.save(uid, Book(book?.id ?: 0, title.value, author.value, genre.selectedItem.toString(), total.value.toInt(), read.value.toInt(), state.selectedItem.toString(), rating.rating.toInt()))
+                db.save(uid, Book(book?.id ?: 0, title.value, author.value, genre.selectedItem.toString(), total.value.toInt(), read.value.toInt(), state.selectedItem.toString(), rating.rating.toInt(), coverPath = editorCover))
+                if (originalCover != editorCover) CoverStore(this, uid).remove(originalCover)
+                originalCover = editorCover
                 navigate("Biblioteca")
             } catch (error: Exception) { android.util.Log.e("Library", "Error al guardar el libro", error); note.text = "No se pudo guardar el libro. Revisa los datos e inténtalo otra vez." }
         }

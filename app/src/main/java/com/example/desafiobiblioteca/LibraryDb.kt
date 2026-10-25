@@ -6,18 +6,20 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** Every query is scoped to the UID from FirebaseAuth, never an email or form input. */
-class LibraryDb(context: Context) : SQLiteOpenHelper(context, "biblioteca.db", null, 1) {
+class LibraryDb(context: Context, name: String = "biblioteca.db") : SQLiteOpenHelper(context, name, null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE books (
             id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL,
             title TEXT NOT NULL, author TEXT NOT NULL, genre TEXT NOT NULL,
             total INTEGER NOT NULL CHECK(total > 0), pages_read INTEGER NOT NULL CHECK(pages_read >= 0 AND pages_read <= total),
-            state TEXT NOT NULL, rating INTEGER NOT NULL DEFAULT 0, finished_at INTEGER)""")
+            state TEXT NOT NULL, rating INTEGER NOT NULL DEFAULT 0, finished_at INTEGER, cover_path TEXT)""")
         db.execSQL("CREATE INDEX books_owner ON books(uid)")
         db.execSQL("CREATE TABLE goals(uid TEXT NOT NULL, year INTEGER NOT NULL, target INTEGER NOT NULL CHECK(target > 0), PRIMARY KEY(uid, year))")
         db.execSQL("CREATE TABLE reading(uid TEXT NOT NULL, book_id INTEGER NOT NULL, year INTEGER NOT NULL, pages INTEGER NOT NULL, PRIMARY KEY(uid, book_id, year))")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE books ADD COLUMN cover_path TEXT")
+    }
     fun books(uid: String): List<Book> {
         require(uid.isNotBlank())
         val result = mutableListOf<Book>()
@@ -26,7 +28,8 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "biblioteca.db", n
                 c.getString(c.getColumnIndexOrThrow("author")), c.getString(c.getColumnIndexOrThrow("genre")),
                 c.getInt(c.getColumnIndexOrThrow("total")), c.getInt(c.getColumnIndexOrThrow("pages_read")),
                 c.getString(c.getColumnIndexOrThrow("state")), c.getInt(c.getColumnIndexOrThrow("rating")),
-                c.getColumnIndexOrThrow("finished_at").let { if (c.isNull(it)) null else c.getLong(it) })
+                c.getColumnIndexOrThrow("finished_at").let { if (c.isNull(it)) null else c.getLong(it) },
+                c.getString(c.getColumnIndexOrThrow("cover_path")))
         }
         return result
     }
@@ -44,6 +47,7 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "biblioteca.db", n
             val values = ContentValues().apply {
                 put("uid", uid); put("title", book.title.trim()); put("author", book.author.trim()); put("genre", book.genre)
                 put("total", book.total); put("pages_read", book.read); put("state", book.state); put("rating", book.rating)
+                put("cover_path", book.coverPath)
                 if (finished == null) putNull("finished_at") else put("finished_at", finished)
             }
             val id = if (previous == null) db.insertOrThrow("books", null, values) else {

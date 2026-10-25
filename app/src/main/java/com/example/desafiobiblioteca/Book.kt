@@ -14,7 +14,8 @@ data class Book(
     val read: Int,
     val state: String,
     val rating: Int = 0,
-    val finishedAt: Long? = null
+    val finishedAt: Long? = null,
+    val coverPath: String? = null
 ) {
     val percent: Int get() = if (total > 0) (read.toLong() * 100 / total).toInt() else 0
 }

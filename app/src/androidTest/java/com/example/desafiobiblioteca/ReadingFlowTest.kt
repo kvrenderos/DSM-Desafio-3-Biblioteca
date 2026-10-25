@@ -20,6 +20,10 @@ import java.util.concurrent.TimeUnit
 /** Real Firebase integration. Creates and removes one temporary test account; never emails it. */
 @RunWith(AndroidJUnit4::class)
 class ReadingFlowTest {
+    private fun pickerFilter() = android.content.IntentFilter(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+        addDataType("*/*")
+        addCategory(android.content.Intent.CATEGORY_OPENABLE)
+    }
     private fun waitFor(text: String) {
         val limit = System.currentTimeMillis() + 15000
         while (true) {
@@ -104,8 +108,54 @@ class ReadingFlowTest {
             onView(withText("Biblioteca")).perform(click())
             screenshot("06-biblioteca")
             clickText("Editar · El principito")
+            val fixture = coverFixture(inst.targetContext.cacheDir)
+            val pickerResult = android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,
+                android.content.Intent().setData(android.net.Uri.fromFile(fixture)))
+            val picker = inst.addMonitor(pickerFilter(), pickerResult, true)
+            try {
+                clickText("Elegir o cambiar imagen")
+                waitFor("Imagen elegida. Guarda el libro para conservarla.")
+                assertEquals(1,picker.hits)
+            } finally { inst.removeMonitor(picker); fixture.delete() }
             field("Páginas leídas","60")
+            scenario.recreate()
+            onView(withTagValue(`is`("Título" as Any))).check(matches(withText("El principito")))
+            onView(withTagValue(`is`("Páginas leídas" as Any))).check(matches(withText("60")))
+            onView(withText("Portada (opcional)")).perform(scrollTo())
+            screenshot("10-portada-formulario")
             clickText("Guardar libro")
+            onView(withText("Editar · El principito")).perform(scrollTo())
+            screenshot("11-libro-con-portada")
+            val coverDb = LibraryDb(inst.targetContext)
+            val storedCover = try { coverDb.books(createdUid).first { it.title=="El principito" }.coverPath } finally { coverDb.close() }
+            assertNotNull(storedCover)
+            assertNotNull(CoverStore(inst.targetContext,createdUid).file(storedCover))
+            clickText("Editar · El principito")
+            val replacement = coverFixture(inst.targetContext.cacheDir)
+            val replacePicker = inst.addMonitor(pickerFilter(),android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,
+                android.content.Intent().setData(android.net.Uri.fromFile(replacement))),true)
+            try {
+                clickText("Elegir o cambiar imagen")
+                waitFor("Imagen elegida. Guarda el libro para conservarla.")
+                assertEquals(1,replacePicker.hits)
+            } finally { inst.removeMonitor(replacePicker); replacement.delete() }
+            clickText("Guardar libro")
+            assertNull(CoverStore(inst.targetContext,createdUid).file(storedCover))
+            val replacementDb = LibraryDb(inst.targetContext)
+            val newCover = try { replacementDb.books(createdUid).first { it.title=="El principito" }.coverPath } finally { replacementDb.close() }
+            assertNotEquals(storedCover,newCover)
+            assertNotNull(CoverStore(inst.targetContext,createdUid).file(newCover))
+            clickText("Editar · El principito")
+            val cancelled = inst.addMonitor(pickerFilter(),
+                android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED,null),true)
+            try {
+                clickText("Elegir o cambiar imagen")
+                assertEquals(1,cancelled.hits)
+                onView(withText("Imagen elegida. Guarda el libro para conservarla.")).check(matches(isDisplayed()))
+            } finally { inst.removeMonitor(cancelled) }
+            clickText("Quitar imagen")
+            clickText("Guardar libro")
+            assertNull(CoverStore(inst.targetContext,createdUid).file(newCover))
             scenario.recreate()
             val reopened = LibraryDb(inst.targetContext)
             try { assertEquals(60,reopened.books(createdUid).first { it.title=="El principito" }.read) } finally { reopened.close() }
@@ -130,6 +180,7 @@ class ReadingFlowTest {
             scenario.close()
             if (createdUid!=null) {
                 val db=LibraryDb(inst.targetContext)
+                db.books(createdUid).forEach { CoverStore(inst.targetContext,createdUid).remove(it.coverPath) }
                 listOf("books","goals","reading").forEach { db.writableDatabase.delete(it,"uid=?",arrayOf(createdUid)) }; db.close()
                 auth.currentUser?.let { Tasks.await(it.delete(),30,TimeUnit.SECONDS) }
             }

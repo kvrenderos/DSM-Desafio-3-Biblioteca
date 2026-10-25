@@ -12,6 +12,14 @@ Aplicación Android de seguimiento de lectura para DSM441, Universidad Don Bosco
 
 El APK incluido es una compilación de depuración para instalación y evaluación, no una publicación en Play Store.
 
+## Portadas opcionales (versión 1.1)
+
+En Agregar libro o Editar libro, usa **Elegir o cambiar imagen**. Se abre el selector de documentos de Android, limitado a imágenes. Puedes guardar sin elegir ninguna; en ese caso se muestra un ícono de libro. **Quitar imagen** permite volver a guardar el libro sin portada.
+
+La imagen se copia, ajusta de tamaño y orientación y se guarda como JPEG dentro del almacenamiento privado de su usuario; no depende de conservar la foto en la galería. No se piden permisos generales de fotos o almacenamiento. La portada se muestra en inicio, biblioteca y mejor lectura. Los campos y la portada elegida se conservan al recrear el formulario. Al cancelar el selector se conserva la selección anterior; al cancelar la edición se conserva la portada guardada.
+
+SQLite se actualiza de versión 1 a 2 mediante ALTER TABLE, conservando libros, metas y progreso. No hace falta desinstalar ni borrar datos. La actualización mantiene la configuración Firebase y el identificador de la aplicación. Se retiró la marca B / del diseño.
+
 ## Funciones
 
 - Registro, ingreso, conservación de sesión y cierre con Firebase Authentication.
@@ -28,7 +36,7 @@ El APK incluido es una compilación de depuración para instalación y evaluaci�
 
 `LibraryDb` crea `biblioteca.db` dentro del almacenamiento privado de Android:
 
-- `books`: UID propietario, título, autor, género, páginas, estado, estrellas y fecha.
+- `books`: UID propietario, título, autor, género, páginas, estado, estrellas, fecha y ruta de portada opcional.
 - `goals`: clave compuesta UID/año y objetivo positivo.
 - `reading`: clave UID/libro/año y páginas registradas.
 
@@ -41,6 +49,8 @@ Las páginas del año son la suma de incrementos guardados en ese año, incluso 
 - `MainActivity.kt`: acceso, inicio, formulario, biblioteca, estadísticas y menú.
 - `LibraryDb.kt`: SQLite, transacciones, separación por UID y progreso anual.
 - `Book.kt`: modelo, validaciones y cálculos reutilizables.
+- `CoverStore.kt`: importación, reducción, orientación y almacenamiento privado de imágenes.
+- `CoverStoreTest.kt`: archivos inválidos, persistencia de portadas, separación por usuario y migración desde SQLite v1.
 - `BookRulesTest.kt`: límites de campos, estados, estrellas, porcentajes y desempate.
 - `LibraryDbTest.kt`: persistencia, aislamiento, páginas por año, correcciones y fechas.
 - `ReadingFlowTest.kt`: flujo de integración en emulador y capturas reales; crea una cuenta temporal en el Firebase configurado y la elimina al finalizar.
